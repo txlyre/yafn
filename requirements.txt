@@ -1,5 +1,0 @@
-cbor2
-pyzmq
-pyvis
-aiohttp
-pycryptodome
