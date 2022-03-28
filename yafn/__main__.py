@@ -200,6 +200,12 @@ parser.add_argument(
 )
 
 parser.add_argument(
+  '-o', '--out',
+  help='Specify output file name.',
+  type=str
+)
+
+parser.add_argument(
   '-c', '--crawl',
   help='Create a map of the network.',
   action='store_true'
@@ -283,7 +289,7 @@ if args.share:
         size += len(piece)
 
     filename = os.path.basename(path)
-    metafile_name = f'{filename}.ynmf'
+    metafile_name = args.out if args.out else f'{filename}.ynmf'
 
     metafile = Metafile(
       filename,
@@ -314,20 +320,25 @@ if args.query:
 
     log.info(f'Query \'{metafile.filename}\'.')
 
-    with open(metafile.filename, 'wb') as f:
-      progress = Progress(len(metafile.pieces))
+    filename = args.out if args.out else metafile.filename
 
-      for hash in metafile.pieces:
-        piece = interface.query(hash)
-        if not piece:
-          log.error(f'Piece {hash[:32].hex()} is not available.')
+    try:
+      with open(filename, 'wb') as f:
+        progress = Progress(len(metafile.pieces))
 
-          continue
+        for hash in metafile.pieces:
+          piece = interface.query(hash)
+          if not piece:
+            log.error(f'Piece {hash[:32].hex()} is not available.')
 
-        f.write(piece)
-        progress.update(1)
+            continue
 
-    log.info(f'File is saved as \'{metafile.filename}\'.')
+          f.write(piece)
+          progress.update(1)
+    except IOError as error:
+      log.fatal(f'Failed to open output file: {error}')
+
+    log.info(f'File is saved as \'{filename}\'.')
 
 if args.start:
   peer = yafn.Peer()
