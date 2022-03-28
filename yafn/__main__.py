@@ -189,7 +189,7 @@ def build_graph(graph, map, first=False):
 parser = argparse.ArgumentParser()
 parser.add_argument(
   '-S', '--start',
-  help='Start up a peer.',
+  help='Start up the local peer.',
   action='store_true'
 )
 
@@ -201,13 +201,26 @@ parser.add_argument(
 
 parser.add_argument(
   '-o', '--out',
-  help='Specify output file name.',
+  help='Specify a path for the output.',
+  action='append',
   type=str
+)
+
+parser.add_argument(
+  '-C', '--cleanup',
+  help='Remove all old pieces.',
+  action='store_true'
 )
 
 parser.add_argument(
   '-c', '--crawl',
   help='Create a map of the network.',
+  action='store_true'
+)
+
+parser.add_argument(
+  '-d', '--discover',
+  help='Send a discover request to the local peer.',
   action='store_true'
 )
 
@@ -229,10 +242,32 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-if args.crawl or args.share or args.query:
+if args.cleanup or args.crawl or args.discover or args.share or args.query:
   interface = yafn.Interface.connect()
 
   atexit.register(interface.close)
+  
+if args.out:
+  total_size = 0
+  
+  if args.share:
+    total_size += len(args.share)
+    
+  if args.query:
+    total_size += len(args.query)
+    
+  if len(args.out) != total_size:
+    log.fatal('Count of the -o arguments doesn\'t match the count of -q/-s arguments.')
+
+  out_index = 0
+  
+if args.cleanup:
+  log.info('Cleaning up...')
+    
+  if interface.cleanup():
+    log.info('Done.')
+  else:
+    log.error('Cleaning up failed.')
 
 if args.crawl:
   log.info(f'Building a map of the network...')
@@ -260,8 +295,18 @@ if args.crawl:
 
   log.info(f'Network map is saved as \'{filename}\'.')
   
+if args.discover:
+  log.info('Discovering the network...')
+    
+  if interface.discover():
+    log.info('Done.')
+  else:
+    log.error('Discovering failed.')
+  
 if args.share:
   for path in args.share:
+    out_index += 1
+    
     if not os.path.isfile(path):
       log.fatal(f'Not a valid file: \'{path}\'.')
 
@@ -289,7 +334,7 @@ if args.share:
         size += len(piece)
 
     filename = os.path.basename(path)
-    metafile_name = args.out if args.out else f'{filename}.ynmf'
+    metafile_name = args.out[out_index - 1] if args.out else f'{filename}.ynmf'
 
     metafile = Metafile(
       filename,
@@ -313,6 +358,8 @@ if args.share:
  
 if args.query:
   for path in args.query:
+    out_index += 1
+    
     try:
       metafile = Metafile.load(path)
     except:
@@ -320,7 +367,7 @@ if args.query:
 
     log.info(f'Query \'{metafile.filename}\'.')
 
-    filename = args.out if args.out else metafile.filename
+    filename = args.out[out_index - 1] if args.out else metafile.filename
 
     try:
       with open(filename, 'wb') as f:

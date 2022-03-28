@@ -374,7 +374,7 @@ class Storage:
     if not os.path.isfile(path):
       return None
 
-    with open(path, 'rb') as f:
+    with open(path, 'rb+') as f:
       try:
         piece = Piece.load(f)
         if piece.hash != hash:
@@ -382,6 +382,9 @@ class Storage:
 
           return None
 
+        piece.timestamp = time.time()
+        piece.dump(f)
+        
         return piece
       except:
         return None
@@ -393,21 +396,37 @@ class Storage:
 
     path = os.path.join(Storage.STORAGE_DIR, piece.hash.hex())
     
+    if os.path.isfile(path):
+      return piece
+    
     with open(path, 'wb') as f:
       piece.dump(f)
 
     return piece
 
   @staticmethod
-  def list_pieces():
+  def list_pieces(only_hash=True):
     pieces = set()
     files = os.listdir(Storage.STORAGE_DIR)
 
     for file in files:
       piece = Storage.find_piece(bytes.fromhex(file))
-      pieces.add(piece.hash)
+      pieces.add(piece.hash if only_hash else piece)
 
     return pieces
+    
+  @staticmethod
+  def cleanup():
+    pieces = Storage.list_pieces(only_hash=False)
+    
+    for piece in pieces:
+      if time.time() - piece.timestamp > 60*60*24*7:
+        try:
+          path = os.path.join(Storage.STORAGE_DIR, piece.hash.hex())
+          
+          os.remove(path)
+        except:
+          pass
 
 class YAFNError(Exception): pass
 
@@ -1109,6 +1128,16 @@ class Interface:
     response, _ = self._contact(b'ANON')
 
     return response == b'DONE'
+    
+  def discover(self):
+    response, _ = self._contact(b'DISC')
+
+    return response == b'DONE'
+    
+  def cleanup(self):
+    response, _ = self._contact(b'CLNP')
+
+    return response == b'DONE'
 
   def listen(self):
     while True:
@@ -1170,6 +1199,20 @@ class Interface:
             raise YAFNError
 
           self._peer.announce()
+
+          self._conn.send(b'DONE')
+        elif command == b'DISC':
+          if len(data) != 0:
+            raise YAFNError
+
+          self._peer.discover()
+
+          self._conn.send(b'DONE')
+        elif command == b'CLNP':
+          if len(data) != 0:
+            raise YAFNError
+
+          Storage.cleanup()
 
           self._conn.send(b'DONE')
         else:
@@ -1281,9 +1324,10 @@ class Tracker:
 class Peer:
   def __init__(self):
     self.connections = []
-    self.trackers = []
-
+    self.trackers = {}
     self.remote_addr = None
+    
+    self._discover_lock = threading.Lock()
 
     Storage.setup()
 
@@ -1292,15 +1336,23 @@ class Peer:
 
     self.pubkey = self.keypair.public_key().export_key('DER')
 
-    trackers = Storage.get_trackers()
-
-    for host in trackers:
-      self.trackers.append(Tracker(host))
-
   def _discover_peers(self):
+    trackers = Storage.get_trackers()
+    
+    for host in self.trackers.copy():
+      if host not in trackers:
+        self.trackers.pop(host, None)
+    
+    for host in trackers:
+      if host not in self.trackers:
+        self.trackers[host] = Tracker(host)
+      
     peers = set()
+    
+    if not self.trackers:
+      return peers
 
-    for tracker in self.trackers:
+    for tracker in self.trackers.values():
       data = tracker.contact(self.remote_addr)
 
       if data is None:
@@ -1376,25 +1428,6 @@ class Peer:
       reconnect_attempts
     )
     conn.listen()
-
-  def _connect_to_everyone(self):
-    if not self.trackers:
-      return
-
-    addrs = [
-      conn.addr for conn in self.connections.copy()
-    ]
-    peers = self._discover_peers()
-    peers = [
-      addr for addr in peers if addr not in addrs
-    ]
-    if not peers:
-      return
-
-    log.info(f'Discovered {len(peers)} peer{"s" if len(peers) != 1 else ""}.')
-
-    for addr in peers:
-      self.connect_to(addr)
 
   def query(self, hash, mid, ttl=7, came_from=None):
     piece = Storage.find_piece(hash)
@@ -1474,6 +1507,28 @@ class Peer:
         continue
 
       conn.announce()
+      
+  def discover(self):
+    try:
+      self._discover_lock.acquire()
+      
+      peers = self._discover_peers()
+    finally:
+      self._discover_lock.release()
+    
+    addrs = [
+      conn.addr for conn in self.connections.copy()
+    ]
+    peers = [
+      addr for addr in peers if addr not in addrs
+    ]
+    if not peers:
+      return
+
+    log.info(f'Discovered {len(peers)} peer{"s" if len(peers) != 1 else ""}.')
+
+    for addr in peers:
+      self.connect_to(addr)
 
   def connect_to(self, addr, reconnect_attempts=0):
     if addr == self.remote_addr:
@@ -1498,7 +1553,7 @@ class Peer:
 
     Timer(
       60*5,
-      self._connect_to_everyone,
+      self.discover,
       2
     ).start()
 
