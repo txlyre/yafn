@@ -782,7 +782,7 @@ class Connection:
 
       self._reconnect_attempts = 0
 
-  def _receive_parts(self, key, parts_count):
+  def _receive_parts(self, key, parts_count, max_size):
     data = b''
     total = 0
     cipher = salsa20_create_decryptor(key)
@@ -791,6 +791,9 @@ class Connection:
       self._socket.settimeout(5)
 
       while total < parts_count:
+        if len(data) >= max_size:
+          raise YAFNError
+
         head = self._recvall(6)
         
         checksum = head[:4]
@@ -798,6 +801,9 @@ class Connection:
 
         part_size = head[4:6]
         part_size = struct.unpack('!H', part_size)[0]
+
+        if part_size < 1 or part_size > Piece.PART_SIZE:
+          raise YAFNError
 
         part = self._recvall(part_size)
         part = cipher.decrypt(part)
@@ -828,6 +834,9 @@ class Connection:
 
     message = self._recvall(size)
     message = RSA_AES_hybrid_decrypt(message, key, self._peer.keypair)
+
+    if len(message) < 1:
+      raise YAFNError
 
     if adler32(message) != checksum:
       raise YAFNError
@@ -865,7 +874,7 @@ class Connection:
       key = payload[:40]
       parts_count = struct.unpack('!H', payload[40:42])[0]
 
-      data = self._receive_parts(key, parts_count)
+      data = self._receive_parts(key, parts_count, Piece.PIECE_SIZE)
 
       fields['piece'] = Piece.create(data)
     elif kind == MessageKind.CRAWL:
@@ -885,7 +894,7 @@ class Connection:
       key = payload[:40]
       parts_count = struct.unpack('!H', payload[40:42])[0]
 
-      data = self._receive_parts(key, parts_count)
+      data = self._receive_parts(key, parts_count, 1024*1024*10)
 
       fields['map'] = Map.create(data)
     elif kind == MessageKind.ANNOUNCE:
@@ -895,7 +904,7 @@ class Connection:
       key = payload[:40]
       parts_count = struct.unpack('!L', payload[40:44])[0]
 
-      data = self._receive_parts(key, parts_count)
+      data = self._receive_parts(key, parts_count, 1024*1024*10)
 
       if len(data) < 32 or len(data) % 32 != 0:
         raise YAFNError
