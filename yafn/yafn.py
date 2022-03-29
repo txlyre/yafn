@@ -1044,7 +1044,7 @@ class Connection:
           )
         )
       elif message.kind == MessageKind.ANNOUNCE:
-        self.near_pieces.union(message.pieces)    
+        self.near_pieces = message.pieces   
     except:
       self.close()
 
