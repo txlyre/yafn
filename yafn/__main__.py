@@ -246,10 +246,11 @@ if args.cleanup or args.crawl or args.discover or args.share or args.query:
   interface = yafn.Interface.connect()
 
   atexit.register(interface.close)
-  
-if args.out:
-  total_size = 0
-  
+
+out_index = 0
+total_size = 0
+
+if args.out: 
   if args.share:
     total_size += len(args.share)
     
@@ -258,8 +259,6 @@ if args.out:
     
   if len(args.out) != total_size:
     log.fatal('Count of the -o arguments doesn\'t match the count of -q/-s arguments.')
-
-  out_index = 0
   
 if args.cleanup:
   log.info('Cleaning up...')
