@@ -240,6 +240,12 @@ parser.add_argument(
   metavar='METAFILE'
 )
 
+parser.add_argument(
+  '-r', '--retry',
+  help='Retry on query error.',
+  action='store_true'
+)
+
 args = parser.parse_args()
 
 if args.cleanup or args.crawl or args.discover or args.share or args.query:
@@ -370,13 +376,28 @@ if args.query:
 
     try:
       with open(filename, 'wb') as f:
-        progress = Progress(len(metafile.pieces))
+        progress = Progress(len(metafile.pieces))      
 
         for hash in metafile.pieces:
-          piece = interface.query(hash)
-          if not piece:
-            log.error(f'Piece {hash[:32].hex()} is not available.')
+          piece = None
+          cooldown = 10
 
+          while True:
+            piece = interface.query(hash)
+            if not piece:
+              log.error(f'Piece {hash[:32].hex()} is not available.')
+
+              if args.retry:
+                log.info(f'Retrying in {cooldown}s...')
+ 
+                time.sleep(cooldown)
+                cooldown += 10
+                
+                continue
+
+            break
+
+          if not piece:
             continue
 
           f.write(piece)

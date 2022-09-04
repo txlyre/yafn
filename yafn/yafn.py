@@ -874,7 +874,7 @@ class Connection:
       key = payload[:40]
       parts_count = struct.unpack('!H', payload[40:42])[0]
 
-      data = self._receive_parts(key, parts_count, Piece.PIECE_SIZE)
+      data = self._receive_parts(key, parts_count, 1024*1024)
 
       fields['piece'] = Piece.create(data)
     elif kind == MessageKind.CRAWL:
